@@ -26,12 +26,12 @@ used in your project's compilation, each paired with a syntax node.</Description
     <PackageTags>incremental-generator, source-generator, generics</PackageTags>
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <FileVersion>$(AssemblyVersion)</FileVersion>
-    <AssemblyVersion>2.0.1.0</AssemblyVersion>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
     <Version>$(AssemblyVersion)</Version>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
