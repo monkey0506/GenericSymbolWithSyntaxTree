@@ -1,5 +1,17 @@
 # CHANGELOG.md
 
+## 3.0.0 (2024-10-25)
+
+ - Bugfix for
+   [#3](https://github.com/monkey0506/Monkeymoto.GeneratorUtils.GenericSymbolReferenceTree/issues/3)
+   (forced version update). This includes many breaking changes in the public
+   API. Notably, `GenericSymbolReferenceTree.GetBranch` and the
+   `GenericSymbolReference` public constructors have been removed.
+ - Fix for
+   [#2](https://github.com/monkey0506/Monkeymoto.GeneratorUtils.GenericSymbolReferenceTree/issues/2).
+   This clarifies the meaning and improves the function of
+   `GenericSymbolReference.IsSyntaxReferenceClosedTypeOrMethod`.
+
 ## 2.0.1 (2024-10-18)
 
  - Allow tracking the `SemanticModel` used to acquire symbols.
