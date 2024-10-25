@@ -11,6 +11,7 @@
    [#2](https://github.com/monkey0506/Monkeymoto.GeneratorUtils.GenericSymbolReferenceTree/issues/2).
    This clarifies the meaning and improves the function of
    `GenericSymbolReference.IsSyntaxReferenceClosedTypeOrMethod`.
+ - Update `Microsoft.CodeAnalysis.Analyzers` package version to 3.11.0.
 
 ## 2.0.1 (2024-10-18)
 
