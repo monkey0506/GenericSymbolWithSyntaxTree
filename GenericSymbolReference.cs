@@ -90,13 +90,26 @@ namespace Monkeymoto.GeneratorUtils
             ImmutableArray<ITypeSymbol> typeArguments;
             if (node is IdentifierNameSyntax)
             {
-                if ((semanticModel.GetOperation(node, cancellationToken) is not IMethodReferenceOperation
-                    methodReference) || !methodReference.Method.IsGenericMethod)
+                node = node.Parent switch
+                {
+                    InvocationExpressionSyntax => node.Parent,
+                    MemberAccessExpressionSyntax => node.Parent.Parent!,
+                    _ => node
+                };
+                IMethodSymbol? methodSymbol = semanticModel.GetOperation(node, cancellationToken) switch
+                {
+                    IInvocationOperation { TargetMethod.IsGenericMethod: true } invocation =>
+                        invocation.TargetMethod,
+                    IMethodReferenceOperation { Method.IsGenericMethod: true } methodReference =>
+                        methodReference.Method,
+                    _ => null
+                };
+                if (methodSymbol is null)
                 {
                     return null;
                 }
-                symbol = methodReference.Method;
-                typeArguments = methodReference.Method.TypeArguments;
+                symbol = methodSymbol;
+                typeArguments = methodSymbol.TypeArguments;
             }
             else
             {
