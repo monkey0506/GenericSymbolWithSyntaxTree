@@ -26,7 +26,7 @@ namespace Monkeymoto.GeneratorUtils
     /// </remarks>
     public sealed class GenericSymbolReferenceTree : IDisposable
     {
-        private readonly Dictionary<ISymbol, HashSet<GenericSymbolReference>> closedBranches =
+        private readonly Dictionary<ISymbol, ImmutableArray<GenericSymbolReference>> closedBranches =
             new(SymbolEqualityComparer.Default);
         private readonly Dictionary<ISymbol, HashSet<GenericSymbolReference>> openBranches =
             new(SymbolEqualityComparer.Default);
@@ -106,34 +106,16 @@ namespace Monkeymoto.GeneratorUtils
         {
             foreach (var reference in references)
             {
-                static void AddReference
-                (
-                    Dictionary<ISymbol, HashSet<GenericSymbolReference>> branches,
-                    GenericSymbolReference reference
-                )
+                if (reference is not null)
                 {
-                    if (branches.TryGetValue(reference.Symbol, out var set))
+                    if (openBranches.TryGetValue(reference.Symbol, out var set))
                     {
                         _ = set.Add(reference);
                     }
                     else
                     {
-                        branches[reference.Symbol] = [reference];
+                        openBranches[reference.Symbol] = [reference];
                     }
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-                switch (reference?.IsClosedTypeOrMethod)
-                {
-                    case true:
-                        AddReference(closedBranches, reference);
-                        break;
-                    case false:
-                        AddReference(openBranches, reference);
-                        break;
-                    case null:
-                    default:
-                        break;
                 }
             }
         }
@@ -176,25 +158,16 @@ namespace Monkeymoto.GeneratorUtils
         )
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            IEnumerable<KeyValuePair<ISymbol, HashSet<GenericSymbolReference>>> GetBranches
-            (
-                Dictionary<ISymbol, HashSet<GenericSymbolReference>> branches
-            )
-            {
-                return symbol.IsDefinition ?
-                    branches.Where(x => SymbolEquals(x.Key.OriginalDefinition, symbol, cancellationToken)) :
-                    branches.TryGetValue(symbol, out var set) ?
-                        [new KeyValuePair<ISymbol, HashSet<GenericSymbolReference>>(symbol, set)] :
-                        [];
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            static bool SymbolEquals(ISymbol? left, ISymbol? right, CancellationToken cancellationToken)
+            bool SymbolEquals(ISymbol? other)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                return SymbolEqualityComparer.Default.Equals(left, right);
+                return SymbolEqualityComparer.Default.Equals(symbol, other);
             }
 
+            if (closedBranches.TryGetValue(symbol, out var branches))
+            {
+                return branches;
+            }
             int typeArgumentCount;
             switch (symbol)
             {
@@ -202,6 +175,21 @@ namespace Monkeymoto.GeneratorUtils
                 case IMethodSymbol { IsGenericMethod: false }:
                 case INamedTypeSymbol { IsGenericType: false }:
                     return [];
+                case ISymbol { IsDefinition: true }:
+                    var newBranches = closedBranches
+                        .Where(x => SymbolEquals(x.Key.OriginalDefinition))
+                        .ToImmutableArray()
+                        .SelectMany(static x => x.Value)
+                        .Concat
+                        (
+                            openBranches
+                                .Where(x => SymbolEquals(x.Key.OriginalDefinition))
+                                .ToImmutableArray()
+                                .SelectMany(x => GetBranchesBySymbol(x.Key, cancellationToken))
+                        );
+                    branches = [.. newBranches];
+                    closedBranches[symbol] = branches;
+                    return branches;
                 case IMethodSymbol methodSymbol:
                     typeArgumentCount = methodSymbol.TypeArguments.Length;
                     break;
@@ -211,79 +199,58 @@ namespace Monkeymoto.GeneratorUtils
                 default:
                     return [];
             }
-            var searchBranches = GetBranches(openBranches);
-            var closedBranchesForSymbol = GetBranches(closedBranches);
-            if (!searchBranches.Any())
+            if (!openBranches.TryGetValue(symbol, out var openBranch))
             {
-                return closedBranchesForSymbol.SelectMany(static x => x.Value).Distinct();
+                return [];
             }
-            searchBranches = searchBranches.ToImmutableArray();
-            var typeArgumentSets = new List<HashSet<INamedTypeSymbol>>(typeArgumentCount);
+            _ = openBranches.Remove(symbol);
+            var typeArgumentSetList = new List<HashSet<INamedTypeSymbol>>(typeArgumentCount);
             for (int i = 0; i < typeArgumentCount; ++i)
             {
-                typeArgumentSets.Add(new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
+                typeArgumentSetList.Add(new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
             }
-            foreach (var kv in searchBranches)
+            foreach (var reference in openBranch)
             {
-                _ = openBranches.Remove(kv.Key);
-                foreach (var reference in kv.Value)
+                var typeArguments = reference.TypeArguments;
+                for (int i = 0; i < typeArgumentCount; ++i)
                 {
-                    var typeArguments = reference.TypeArguments;
-                    for (int i = 0; i < typeArgumentCount; ++i)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var typeArgument = typeArguments[i];
+                    var typeArgumentSet = typeArgumentSetList[i];
+                    if (GenericSymbolReference.IsOpenTypeOrMethodSymbol(typeArgument))
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        var typeArgument = typeArguments[i];
-                        var typeArgumentSet = typeArgumentSets[i];
-                        if (GenericSymbolReference.IsOpenTypeOrMethodSymbol(typeArgument))
-                        {
-                            typeArgumentSet.UnionWith
-                            (
-                                typeArgument switch
-                                {
-                                    ITypeParameterSymbol typeParameter =>
-                                        GetBranchesBySymbol(typeParameter.ContainingSymbol, cancellationToken)
-                                            .Select(x => (INamedTypeSymbol)x.TypeArguments[typeParameter.Ordinal]),
-                                    _ => GetBranchesBySymbol(typeArgument, cancellationToken)
-                                        .Select(static x => (INamedTypeSymbol)x.Symbol)
-                                }
-                            );
-                        }
-                        else
-                        {
-                            _ = typeArgumentSet.Add((INamedTypeSymbol)typeArgument);
-                        }
+                        typeArgumentSet.UnionWith
+                        (
+                            typeArgument switch
+                            {
+                                ITypeParameterSymbol typeParameter =>
+                                    GetBranchesBySymbol(typeParameter.ContainingSymbol, cancellationToken)
+                                        .Select(x => (INamedTypeSymbol)x.TypeArguments[typeParameter.Ordinal]),
+                                _ => GetBranchesBySymbol(typeArgument, cancellationToken)
+                                    .Select(static x => (INamedTypeSymbol)x.Symbol)
+                            }
+                        );
+                    }
+                    else
+                    {
+                        _ = typeArgumentSet.Add((INamedTypeSymbol)typeArgument);
                     }
                 }
             }
-            foreach (var closedReference in closedBranchesForSymbol.SelectMany(static x => x.Value))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var typeArguments = closedReference.TypeArguments;
-                for (int i = 0; i < typeArgumentCount; ++i)
-                {
-                    var typeArgument = typeArguments[i];
-                    var typeArgumentSet = typeArgumentSets[i];
-                    _ = typeArgumentSet.Add((INamedTypeSymbol)typeArgument);
-                }
-            }
-            Func<ITypeSymbol[], ISymbol>? construct = symbol switch
+            Func<ITypeSymbol[], ISymbol> construct = symbol switch
             {
                 IMethodSymbol methodSymbol => methodSymbol.OriginalDefinition.Construct,
                 INamedTypeSymbol namedTypeSymbol => namedTypeSymbol.OriginalDefinition.Construct,
-                _ => throw new UnreachableException(),
+                _ => throw new UnreachableException()
             };
             var constructedSymbols = new List<ISymbol>();
-            foreach (var typeArgumentList in typeArgumentSets.CartesianProduct())
+            foreach (var typeArgumentList in typeArgumentSetList.CartesianProduct())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 constructedSymbols.Add(construct([.. typeArgumentList]));
             }
-            if (!closedBranches.TryGetValue(symbol, out var set))
-            {
-                set = [];
-                closedBranches[symbol] = set;
-            }
-            foreach (var reference in searchBranches.SelectMany(static x => x.Value))
+            var newReferences = new HashSet<GenericSymbolReference>();
+            foreach (var reference in openBranch)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 foreach (var constructedSymbol in constructedSymbols)
@@ -292,9 +259,9 @@ namespace Monkeymoto.GeneratorUtils
                     {
                         IMethodSymbol methodSymbol => methodSymbol.TypeArguments,
                         INamedTypeSymbol namedTypeSymbol => namedTypeSymbol.TypeArguments,
-                        _ => []
+                        _ => throw new UnreachableException()
                     };
-                    _ = set.Add
+                    _ = newReferences.Add
                     (
                         new GenericSymbolReference
                         (
@@ -307,7 +274,9 @@ namespace Monkeymoto.GeneratorUtils
                     );
                 }
             }
-            return GetBranches(closedBranches).SelectMany(static x => x.Value).Distinct();
+            branches = [.. newReferences];
+            closedBranches[symbol] = branches;
+            return branches;
         }
     }
 }
