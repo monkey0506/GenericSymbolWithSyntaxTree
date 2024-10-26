@@ -75,7 +75,13 @@ namespace Monkeymoto.GeneratorUtils
                     {
                         GenericNameSyntax => true,
                         IdentifierNameSyntax identifierName =>
-                            identifierName.Parent is ArgumentSyntax or EqualsValueClauseSyntax,
+                            identifierName.Parent switch
+                            {
+                                ArgumentSyntax or EqualsValueClauseSyntax or InvocationExpressionSyntax => true,
+                                MemberAccessExpressionSyntax memberAccessExpression =>
+                                    memberAccessExpression.Parent is InvocationExpressionSyntax,
+                                _ => false
+                            },
                         _ => false
                     } && !excludePathPredicate(node.SyntaxTree.FilePath);
                 },
